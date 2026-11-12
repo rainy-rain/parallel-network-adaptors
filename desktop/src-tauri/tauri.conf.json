@@ -1,0 +1,64 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ParallelNetworkToolkit",
+  "version": "1.0.0",
+  "identifier": "com.mosesmuxixie.parallelnetwork",
+  "build": {
+    "beforeDevCommand": "node node_modules/vite/bin/vite.js",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "node node_modules/vite/bin/vite.js build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "并行网络工具箱",
+        "width": 1080,
+        "height": 780,
+        "minWidth": 880,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../resources/*"
+    ],
+    "shortDescription": "双链路分流 + Steam 社区直连",
+    "longDescription": "两条独立工具合一的桌面工具箱：连接级网卡分流（多线程下载叠加带宽），以及基于 Caddy 域前置的 Steam 社区直连。",
+    "copyright": "MIT License",
+    "category": "Utility",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "exceptionDomain": ""
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  }
+}

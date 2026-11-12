@@ -1,0 +1,26 @@
+{
+	admin off
+}
+
+(steamcommunity) {
+	tls internal
+	reverse_proxy https://steampowered.com:443 {
+		header_up Host steamcommunity.com
+		transport http {
+			tls
+			tls_server_name steampowered.com
+		}
+	}
+	log {
+		output file access.log
+		format json
+	}
+}
+
+https://steamcommunity.com {
+	import steamcommunity
+}
+
+https://www.steamcommunity.com {
+	import steamcommunity
+}

@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# 二进制（安装时按需下载 / CI 时下载）
+**/caddy.exe
+desktop/resources/caddy
+
+# 运行时产物
+*.log
+**/access.log
+hosts.bak.*
+
+# 前端
+desktop/node_modules/
+desktop/dist/
+desktop/.vite/
+
+# Rust / Tauri
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# 图标源文件（由 icon-source.png 生成后不再需要）
+desktop/icon-source.png

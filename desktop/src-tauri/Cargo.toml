@@ -1,0 +1,28 @@
+[package]
+name = "parallel-network-toolkit"
+version = "1.0.0"
+description = "并行网络工具箱 — 双链路分流 + Steam 社区直连"
+authors = ["Mo_XI"]
+license = "MIT"
+repository = "https://github.com/rainy-rain/parallel-network-adaptors"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "parallel_network_toolkit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

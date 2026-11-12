@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>并行网络工具箱</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo"></span>
+        <div>
+          <h1>并行网络工具箱</h1>
+          <p class="sub">两个独立工具，按需选用；互不依赖，可单独启用</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="platform-tag" id="platform-tag">—</span>
+        <button class="btn ghost" id="btn-refresh-all" title="刷新两个工具的状态">刷新状态</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="adapters">双链路并行</button>
+      <button class="tab" data-tab="steam">Steam 社区直连</button>
+    </nav>
+
+    <main class="content">
+      <!-- ============ 双链路并行 ============ -->
+      <section class="pane active" id="pane-adapters">
+        <div class="cards">
+          <div class="card status-card">
+            <div class="card-label">分流器状态</div>
+            <div class="status-line">
+              <span class="dot" id="split-dot"></span>
+              <span id="split-state">未运行</span>
+            </div>
+            <div class="status-meta" id="split-meta">端口 1080 · 模式 split</div>
+          </div>
+          <div class="card status-card">
+            <div class="card-label">物理链路</div>
+            <div class="status-line">
+              <span class="big-num" id="link-count">0</span>
+              <span class="unit">条</span>
+            </div>
+            <div class="status-meta" id="link-hint">点「重新检测」枚举网卡</div>
+          </div>
+          <div class="card status-card hint-card">
+            <div class="card-label">原理</div>
+            <p class="hint-text">
+              一条 TCP 连接只能走一张网卡。分流器按连接轮询绑定网卡，
+              只有<b>多线程 / 分片下载</b>才能把两条链路的带宽叠起来。
+            </p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button class="btn" id="btn-detect">重新检测链路</button>
+          <button class="btn" id="btn-probe">链路自检</button>
+          <button class="btn primary" id="btn-split-start">启动分流</button>
+          <button class="btn" id="btn-split-stop">停止分流</button>
+          <span class="spacer"></span>
+          <label class="inline-field">线程
+            <input type="number" id="threads" value="16" min="1" max="128" />
+          </label>
+          <label class="inline-field">分片 MB
+            <input type="number" id="chunk" value="4" min="1" max="64" />
+          </label>
+          <button class="btn" id="btn-download">多线程下载测试</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="links-table">
+            <thead>
+              <tr>
+                <th style="width:48px">#</th>
+                <th>网卡</th>
+                <th style="width:130px">IPv4</th>
+                <th style="width:130px">网关</th>
+                <th style="width:70px">度量</th>
+                <th style="width:70px">类型</th>
+                <th style="width:110px">出口归属</th>
+              </tr>
+            </thead>
+            <tbody id="links-body">
+              <tr class="empty-row"><td colspan="7">还没有枚举链路</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="log-panel">
+          <div class="log-head">
+            <span>输出</span>
+            <div class="log-actions">
+              <button class="link-btn" data-open-log="split">打开分流日志</button>
+              <button class="link-btn" id="btn-clear-log">清空</button>
+            </div>
+          </div>
+          <pre class="log" id="log-adapters"></pre>
+        </div>
+      </section>
+
+      <!-- ============ Steam 社区直连 ============ -->
+      <section class="pane" id="pane-steam">
+        <div class="cards">
+          <div class="card status-card">
+            <div class="card-label">总状态</div>
+            <div class="status-line">
+              <span class="dot" id="steam-dot"></span>
+              <span id="steam-state">未知</span>
+            </div>
+            <div class="status-meta" id="steam-meta">本机终结 TLS，再转发到 Valve 白名单域名</div>
+          </div>
+          <div class="card status-card">
+            <div class="card-label">组成</div>
+            <ul class="mini-list">
+              <li><span id="st-caddy">Caddy</span></li>
+              <li><span id="st-hosts">hosts</span></li>
+              <li><span id="st-ca">根证书</span></li>
+              <li><span id="st-port">443 端口</span></li>
+            </ul>
+          </div>
+          <div class="card status-card hint-card">
+            <div class="card-label">SNI 再封还能用吗</div>
+            <p class="hint-text">
+              <b>能。</b>本机终结 TLS 后，对外只出现 <code>steampowered.com</code>
+              这类白名单域名的 SNI，与 <code>steamcommunity.com</code> 是否被封无关。
+            </p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button class="btn primary" id="btn-steam-enable">开启</button>
+          <button class="btn" id="btn-steam-disable">关闭</button>
+          <button class="btn" id="btn-steam-test">自检</button>
+          <button class="btn" id="btn-steam-log">打开日志</button>
+        </div>
+
+        <div class="log-panel">
+          <div class="log-head">
+            <span>输出</span>
+            <div class="log-actions">
+              <button class="link-btn" id="btn-clear-steam-log">清空</button>
+            </div>
+          </div>
+          <pre class="log" id="log-steam"></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span id="status-msg">就绪</span>
+      <span class="spacer"></span>
+      <span class="dim">MIT License · 仅供学习与自用</span>
+    </footer>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
