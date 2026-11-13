@@ -75,6 +75,63 @@ powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\ParallelNetworkToolk
 
 ---
 
+## 界面说明（每个按钮是干什么的）
+
+窗口分三个标签页，对应三个互相独立的工具。**鼠标悬停在任何按钮上也会显示同一段说明。**
+
+### 顶栏
+
+| 控件 | 作用 |
+|---|---|
+| 平台标签 | 显示当前识别到的系统（Windows / macOS）；决定走 `.ps1` 还是 `.sh` / `.py` |
+| **刷新状态** | 重新读三项状态。每次都要起一次 PowerShell，约 1 秒 |
+| 状态栏（底部） | 显示当前正在做什么、上一次操作的结果 |
+
+### 标签页一：双链路并行
+
+把多条网卡同时在一条本地 SOCKS5 端口上并行出口。**不需要管理员，不改路由，不装驱动。**
+
+| 控件 | 作用 |
+|---|---|
+| **重新检测链路** | 枚举网卡，只保留「已启用 + 有 IPv4 + 有默认网关」的，标出物理 / 虚拟与出口归属（校园网 / 手机蜂窝 / ICS 共享…） |
+| **链路自检** | 让每条链路各下载 500 KB，验证它**真的能出网**，并报出速度。链路表里有不代表能上网 |
+| **启动分流** | 在 `127.0.0.1:1080` 起 SOCKS5。新连接按网卡轮询分发 |
+| **停止分流** | 停掉并释放 1080 |
+| **打开分流日志** | 打开分流器自己的日志文件 |
+| **用代理重启选中进程** | 给选中的程序设 `HTTP_PROXY` / `ALL_PROXY` 后重启它 —— 只有走系统代理的程序才吃得到这套分流 |
+| **线程数** | 分片下载的并发线程数，默认 16。线程越多越容易吃满多条链路，小文件收益有限 |
+| **分片（MB）** | 每个分片多大，默认 4 MB。文件要被切成这么多份才能并行下载 |
+| **多线程下载测试** | 按上面两个参数跑一次真实下载，验证带宽是否真的叠加 |
+
+**这个工具解决什么**：单条 TCP 只能走一条网卡，所以一条连接再快也压不满两条线。只有多线程 / 分片这类并发场景，才能把两条线的带宽加在一起。
+
+### 标签页二：Steam 社区直连
+
+社区和商店被按 SNI 拦掉时，在本机终结 TLS 再转发到 Valve 白名单域名（域前置）。
+
+| 控件 | 作用 |
+|---|---|
+| **开启** | 起 Caddy（监听 443）→ 装本地根证书 → 写 hosts → 验证一次 → 注册开机自启。**需要管理员** |
+| **关闭** | 停 Caddy → 清 hosts → 删自启任务，**保留根证书**（下次开启更快） |
+| **自检** | 四项状态（Caddy / hosts / 证书 / 443）+ SNI 是否还被封 + 反代能否连通 + 真的用浏览器拉一次首页 |
+| **打开日志** | Caddy 访问日志（JSON，一次请求一行，含状态码、耗时、大小、UA） |
+| 四行状态 | Caddy 进程 / hosts 是否写入 / 根证书是否已装 / 443 是否在听 |
+
+**这个工具解决什么**：浏览器和 Steam 客户端把 SNI 写死在程序里，改不了。所以只能在本机做 TLS 终结 —— 客户端以为自己在跟 `steamcommunity.com` 说话，实际是 Caddy；Caddy 再以 `steampowered.com` 的身份去连 Akamai，回程原样交回。
+
+### 标签页三：CM 直连中继
+
+Steam 底部显示 NO CONNECTION、好友与聊天掉线 —— 这是 CM 连不上，与商店/社区无关。
+
+| 控件 | 作用 |
+|---|---|
+| **开启 CM 直连** | 起中继（24 个 DC × 22 端口 = **528 个本地监听**）→ 写 hosts → 刷 DNS 缓存。**约 17 秒**。完成后要**彻底退出 Steam 再启动**（托盘右键退出，不是关窗口） |
+| **关闭 CM 直连** | 停中继 → 从 hosts 删掉 CM 那一段 → 完全恢复原状 |
+| **测速** | 对 4 个 DC 各做一次 TLS 握手，验证分片是否真的绕过了 DPI，报出握手耗时 |
+| **打开日志** | 中继日志，每次连接一行（accept / tunnel up / 对端 IP） |
+| 四行状态 | 是否在跑 / 监听数 / DC 数 / hosts 是否写入 / 中继进程 PID |
+
+**这个工具解决什么**：这台网络对 CM 的 TLS 握手做 IP 级阻断（TCP 通、明文通、ClientHello 一发出就 RST），但 **DPI 不做 TCP 流重组**。所以把首包切成 20 字节一段、间隔 3 ms 写出去就能过。**全程走本地回环，不经过任何代理节点。**
 ## 工具一：双链路并行
 
 把 Windows 上两条**互相独立**的链路（比如 校园网 Wi-Fi + 手机 USB 共享）按连接分流，让支持代理的软件同时使用两条线路。
@@ -293,6 +350,83 @@ SNI 未封：真实 IP 23.15.140.216，HTTP 200，TLS 握手成功 0.268s
 
 ---
 
+## 工具三：Steam CM 直连（TLS 分片）
+
+Steam 底部状态栏显示 **NO CONNECTION**，库里能看、头像能显示，但好友和聊天一直掉线。这不是商店或社区的问题，是 **CM（连接管理器）** 连不上。
+
+### 原理
+
+Steam 的 CM 走自己的 TCP 协议（27015–27036 端口，WebSocket 走 443），**不读系统代理**（注册表 `HKCU\Software\Valve\Steam` 的 `ProxyMode` 是空的），所以 Clash 之类设了系统代理也管不到它。
+
+实测该网络对 CM 的处理是：**TCP 三次握手放行，ClientHello 一发出去就回 RST**。24 个 CM 域名 × 23 个端口 = 552 个组合，TLS 成功 0 个；但同一批 IP 的 80 端口明文 HTTP 是 404 正常。也就是说封的是 **TLS 握手**，不是 IP 也不是端口。
+
+关键发现：**这台网络的 DPI 不做 TCP 流重组**，只在单个 TCP 段内匹配 ClientHello 的特征。于是把首包切开分几次发出去就能过：
+
+| 每段字节 | 段间延迟 | 结果 |
+|---|---|---|
+| 1 | 30 ms | OK（TLS 1.2 握手成功）|
+| 3 | 10 ms | OK |
+| 10 | 5 ms | OK |
+| 50 | 2 ms | OK |
+| 1000（不分片）| 0 | **RST** |
+
+所以不需要任何代理：本机起一个转发器，把 Steam 发给 CM 的字节切成 20 字节一段、间隔 3 ms 写出去，CM 回来的数据原样转发。全程走本地回环，**不经过任何境外节点**。
+
+### 结构
+
+- `cm-splitter.ps1` — 启停、状态、测速，并维护 hosts
+- `CmSplitter.cs` — 转发器本体（`TcpListener` + 分片写 + 双向 `Pump`）
+- 24 个 CM 域名指向 `127.0.0.2`–`127.0.0.25`，每个 IP 上监听 22 个端口（27015–27036），共 **528 个监听**
+- hosts 里由 `# === SteamCM BEGIN ===` / `# === SteamCM END ===` 包住的那一段，关闭时整段删除
+
+### 用法
+
+桌面版：Steam 标签页顶部的「CM 直连中继」卡片 → **开启**。
+
+命令行：
+
+```powershell
+# 开启（起转发器 + 写 hosts + 刷新 DNS 缓存）
+powershell -ExecutionPolicy Bypass -File cm-splitter.ps1 -Action enable
+
+# 看状态
+powershell -ExecutionPolicy Bypass -File cm-splitter.ps1 -Action status
+
+# 测速（4 个 DC）
+powershell -ExecutionPolicy Bypass -File cm-splitter.ps1 -Action test
+
+# 关闭（停转发器 + 清 hosts）
+powershell -ExecutionPolicy Bypass -File cm-splitter.ps1 -Action disable
+```
+
+`status` 输出 `KEY=VALUE` 五行：`CM_ENABLED` / `CM_PID` / `CM_LISTENERS` / `CM_DC` / `CM_HOSTS`。
+
+### 实测
+
+```
+CM_ENABLED=1  CM_PID=23100  CM_LISTENERS=528  CM_DC=24  CM_HOSTS=1
+
+cmp1-hkg1  403  0.414s   （含 TLS 握手）
+cmp2-hkg1  403  0.400s
+cmp1-sgp1  403  0.760s
+```
+
+同一条 `cmp1-hkg1:27018` 走 SOCKS5 代理要 3.47 s，分片中继 **0.41 s**，快 8 倍，而且不消耗节点流量。
+
+Steam 侧日志确认：
+
+```
+ConnectionCompleted() (127.0.0.2:27020, WebSocket)
+[Connected, 4, 7] Logging on [U:1:...]
+[Logged On, 4, 7] processing complete
+```
+
+### 已知限制
+
+- 仅 Windows。macOS 上这个卡片会提示不支持。
+- 24 个 DC 里约 18 个可用；`cmp1/2-tyo3`、`ext1/2-bom2`、`ext1/2-maa2` 是 IP 本身路由不通，不是 DPI 问题。
+- 需要 528 个监听端口，防火墙弹窗要允许。
+- 开过 UU 加速器后它可能改写 hosts，重新点一次「开启」即可覆盖回来。
 ## 目录结构
 
 ```
@@ -305,6 +439,8 @@ SNI 未封：真实 IP 23.15.140.216，HTTP 200，TLS 握手成功 0.268s
 ├── gui/
 │   ├── Launcher.ps1         工具箱启动器
 │   └── AdaptersGUI.ps1      双链路并行 图形界面
+├── cm-splitter.ps1        # CM 直连中继（启停 / 状态 / 测速）
+├── CmSplitter.cs          # 分片转发器本体
 ├── steam-community/
 │   ├── SteamProxy.ps1       Steam 社区直连 图形界面
 │   └── Caddyfile            反代规则

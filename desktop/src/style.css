@@ -354,3 +354,10 @@ body {
   border-radius: inherit;
   cursor: progress;
 }
+
+/* CM 区块与 Steam 区块的分隔线 */
+.sep {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 20px 0 8px;
+}

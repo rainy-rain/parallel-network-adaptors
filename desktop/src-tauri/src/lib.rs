@@ -38,6 +38,15 @@ pub struct SplitStatus {
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub struct CmStatus {
+    pub enabled: bool,
+    pub pid: u32,
+    pub listeners: u32,
+    pub dcs: u32,
+    pub hosts: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub struct SteamStatus {
     pub caddy: bool,
     pub hosts: bool,
@@ -67,8 +76,26 @@ fn ensure_scripts(app: &AppHandle) -> Result<PathBuf, String> {
         .resource_dir()
         .map_err(|e| format!("取资源目录失败：{e}"))?;
 
-    // Tauri 打包后 resources 可能位于 resource_dir 根或 resources/ 子目录
-    let candidates = [res.clone(), res.join("resources")];
+    // Tauri v2 的 NSIS 安装器把 resources 放在 <install>/_up_/resources，
+    // macOS 的 .app 在 Contents/Resources，dev 模式在 target/debug。
+    // 这里把常见落点全列出来，再补一层「resource_dir 下所有子目录」的兜底，
+    // 否则安装后脚本目录是空的，点任何按钮都会报「脚本缺失」。
+    let mut candidates: Vec<PathBuf> = vec![
+        res.clone(),
+        res.join("resources"),
+        res.join("_up_"),
+        res.join("_up_").join("resources"),
+        res.join("Resources"),
+    ];
+    if let Ok(rd) = std::fs::read_dir(&res) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                candidates.push(p.join("resources"));
+                candidates.push(p.clone());
+            }
+        }
+    }
 
     let mut names: Vec<&str> = vec![
         "split-proxy.ps1",
@@ -78,6 +105,8 @@ fn ensure_scripts(app: &AppHandle) -> Result<PathBuf, String> {
         "split-proxy.py",
         "multi-fetch.sh",
         "SteamProxy.sh",
+        "cm-splitter.ps1",
+        "CmSplitter.cs",
     ];
     // caddy 二进制随包分发，运行时释放到脚本目录
     #[cfg(windows)]
@@ -87,16 +116,11 @@ fn ensure_scripts(app: &AppHandle) -> Result<PathBuf, String> {
 
     for name in names {
         let mut src: Option<PathBuf> = None;
-        let flat = res.join(name);
-        if flat.is_file() {
-            src = Some(flat);
-        } else {
-            for c in &candidates {
-                let p = c.join(name);
-                if p.is_file() {
-                    src = Some(p);
-                    break;
-                }
+        for c in &candidates {
+            let p = c.join(name);
+            if p.is_file() {
+                src = Some(p);
+                break;
             }
         }
         let Some(src) = src else { continue };
@@ -147,6 +171,18 @@ fn caddy_path(dir: &Path) -> PathBuf {
 
 // ==================== 统一执行入口 ====================
 
+/// Windows PowerShell 5.1 默认按系统 ANSI 写 stdout/stderr（中文机器是 GBK 936），
+/// 而这里一直按 UTF-8 读，于是「网关 / 度量 / 物理 / 出口」全变成乱码，
+/// parse_links 一条都解析不出来。先试 UTF-8，不合法再退回 GBK。
+fn decode_output(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            let (cow, _, _) = encoding_rs::GBK.decode(bytes);
+            cow.into_owned()
+        }
+    }
+}
 fn run_in(dir: &Path, program: &Path, args: &[&str], extra_env: &[(&str, &str)]) -> Result<String, String> {
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(dir);
@@ -168,8 +204,8 @@ fn run_in(dir: &Path, program: &Path, args: &[&str], extra_env: &[(&str, &str)])
         .output()
         .map_err(|e| format!("启动进程失败：{e}"))?;
 
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let stdout = decode_output(&out.stdout);
+    let stderr = decode_output(&out.stderr);
 
     if out.status.success() {
         Ok(if stderr.trim().is_empty() {
@@ -321,7 +357,7 @@ fn yes(v: Option<&str>) -> bool {
 // ==================== 命令：平台信息 ====================
 
 #[tauri::command]
-fn platform_info(app: AppHandle) -> Result<PlatformInfo, String> {
+async fn platform_info(app: AppHandle) -> Result<PlatformInfo, String> {
     let dir = scripts_dir(&app)?;
     let caddy = caddy_path(&dir);
     let caddy_present = caddy.is_file()
@@ -342,7 +378,7 @@ fn platform_info(app: AppHandle) -> Result<PlatformInfo, String> {
 // ==================== 命令：链路 ====================
 
 #[tauri::command]
-fn list_links(app: AppHandle) -> Result<Vec<Link>, String> {
+async fn list_links(app: AppHandle) -> Result<Vec<Link>, String> {
     #[cfg(windows)]
     let raw = run_script(&app, "split-proxy.ps1", &["-List"])?;
     #[cfg(not(windows))]
@@ -352,7 +388,7 @@ fn list_links(app: AppHandle) -> Result<Vec<Link>, String> {
 }
 
 #[tauri::command]
-fn probe_links(app: AppHandle) -> Result<String, String> {
+async fn probe_links(app: AppHandle) -> Result<String, String> {
     #[cfg(windows)]
     {
         run_script(&app, "split-proxy.ps1", &["-SelfTest"])
@@ -399,7 +435,7 @@ fn find_split_pid() -> Option<u32> {
 }
 
 #[tauri::command]
-fn split_status(app: AppHandle) -> Result<SplitStatus, String> {
+async fn split_status(app: AppHandle) -> Result<SplitStatus, String> {
     let _ = app;
     let pid = find_split_pid();
     Ok(SplitStatus {
@@ -410,7 +446,7 @@ fn split_status(app: AppHandle) -> Result<SplitStatus, String> {
 }
 
 #[tauri::command]
-fn split_start(app: AppHandle, port: u16) -> Result<String, String> {
+async fn split_start(app: AppHandle, port: u16) -> Result<String, String> {
     if find_split_pid().is_some() {
         return Ok("分流器已在运行".to_string());
     }
@@ -457,7 +493,7 @@ fn split_start(app: AppHandle, port: u16) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn split_stop(app: AppHandle) -> Result<String, String> {
+async fn split_stop(app: AppHandle) -> Result<String, String> {
     let _ = app;
     let Some(pid) = find_split_pid() else {
         return Ok("分流器未在运行".to_string());
@@ -487,6 +523,7 @@ fn split_stop(app: AppHandle) -> Result<String, String> {
 // ==================== 命令：Steam 社区直连 ====================
 
 #[cfg(windows)]
+#[allow(dead_code)]
 fn port_listening(port: u16) -> bool {
     let out = Command::new("powershell.exe")
         .args([
@@ -506,6 +543,7 @@ fn port_listening(port: u16) -> bool {
 }
 
 #[cfg(not(windows))]
+#[allow(dead_code)]
 fn port_listening(port: u16) -> bool {
     let out = Command::new("/usr/sbin/lsof")
         .args(["-nP", &format!("-iTCP:{}", port), "-sTCP:LISTEN"])
@@ -517,16 +555,23 @@ fn port_listening(port: u16) -> bool {
 }
 
 #[tauri::command]
-fn steam_status(app: AppHandle) -> Result<SteamStatus, String> {
-    let dir = ensure_scripts(&app)?;
+async fn steam_status(app: AppHandle) -> Result<SteamStatus, String> {
+    let _dir = ensure_scripts(&app)?;
 
-    let caddy = find_caddy_pid().is_some();
-    let p443 = port_listening(443);
-
+    // hosts 是纯文件读取，直接读，不起进程
     let hosts = read_hosts().unwrap_or_default();
     let hosts_ok = hosts.contains("steamcommunity.com") && hosts.contains("127.0.0.1");
 
-    let ca = ca_trusted(&dir);
+    // 进程 / 端口 / 根证书三项合并成一次 PowerShell，省掉两次 ~0.5s 的进程启动
+    #[cfg(windows)]
+    let (caddy, p443, ca) = steam_probe_all();
+
+    #[cfg(not(windows))]
+    let (caddy, p443, ca) = (
+        find_caddy_pid().is_some(),
+        port_listening(443),
+        ca_trusted(std::path::Path::new("")),
+    );
 
     Ok(SteamStatus {
         caddy,
@@ -537,7 +582,30 @@ fn steam_status(app: AppHandle) -> Result<SteamStatus, String> {
     })
 }
 
+/// 一次 PowerShell 取回三项状态，返回 (caddy 在跑, 443 在听, 根证书已装)
 #[cfg(windows)]
+fn steam_probe_all() -> (bool, bool, bool) {
+    let script = r#"$c=@(Get-Process -Name caddy -ErrorAction SilentlyContinue).Count -gt 0; $p=@(Get-NetTCPConnection -LocalPort 443 -State Listen -ErrorAction SilentlyContinue).Count -gt 0; $a=@(Get-ChildItem Cert:\LocalMachine\Root -ErrorAction SilentlyContinue | Where-Object { $_.Subject -like '*Caddy Local Authority*' }).Count -gt 0; Write-Output "$c $p $a""#;
+    let out = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match out {
+        Ok(o) => {
+            let s = String::from_utf8_lossy(&o.stdout);
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            (
+                parts.first().map(|v| *v == "True").unwrap_or(false),
+                parts.get(1).map(|v| *v == "True").unwrap_or(false),
+                parts.get(2).map(|v| *v == "True").unwrap_or(false),
+            )
+        }
+        Err(_) => (false, false, false),
+    }
+}
+
+#[cfg(windows)]
+#[allow(dead_code)]
 fn find_caddy_pid() -> Option<u32> {
     let out = Command::new("powershell.exe")
         .args([
@@ -572,6 +640,7 @@ fn read_hosts() -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("读 hosts 失败：{e}"))
 }
 
+#[allow(dead_code)]
 fn ca_trusted(_dir: &Path) -> bool {
     #[cfg(windows)]
     {
@@ -596,7 +665,7 @@ fn ca_trusted(_dir: &Path) -> bool {
 }
 
 #[tauri::command]
-fn steam_enable(app: AppHandle) -> Result<String, String> {
+async fn steam_enable(app: AppHandle) -> Result<String, String> {
     #[cfg(windows)]
     {
         run_script(&app, "SteamProxy.ps1", &["-EnableQuiet"])
@@ -608,7 +677,7 @@ fn steam_enable(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn steam_disable(app: AppHandle) -> Result<String, String> {
+async fn steam_disable(app: AppHandle) -> Result<String, String> {
     #[cfg(windows)]
     {
         run_script(&app, "SteamProxy.ps1", &["-DisableQuiet"])
@@ -620,7 +689,7 @@ fn steam_disable(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn steam_test(app: AppHandle) -> Result<String, String> {
+async fn steam_test(app: AppHandle) -> Result<String, String> {
     #[cfg(windows)]
     {
         run_script(&app, "SteamProxy.ps1", &["-Test"])
@@ -633,8 +702,57 @@ fn steam_test(app: AppHandle) -> Result<String, String> {
 
 // ==================== 命令：日志与下载 ====================
 
+fn parse_cm(output: &str) -> CmStatus {
+    let get = |k: &str| -> Option<String> {
+        let prefix = format!("{k}=");
+        output
+            .lines()
+            .find(|l| l.starts_with(&prefix))
+            .map(|l| l[prefix.len()..].trim().to_string())
+    };
+    CmStatus {
+        enabled: get("CM_ENABLED").map(|v| v == "1").unwrap_or(false),
+        pid: get("CM_PID").and_then(|v| v.parse().ok()).unwrap_or(0),
+        listeners: get("CM_LISTENERS").and_then(|v| v.parse().ok()).unwrap_or(0),
+        dcs: get("CM_DC").and_then(|v| v.parse().ok()).unwrap_or(0),
+        hosts: get("CM_HOSTS").map(|v| v == "1").unwrap_or(false),
+    }
+}
+
 #[tauri::command]
-fn read_log(app: AppHandle, kind: String, tail: usize) -> Result<String, String> {
+async fn cm_status(app: AppHandle) -> Result<CmStatus, String> {
+    if !cfg!(windows) {
+        return Ok(CmStatus { enabled: false, pid: 0, listeners: 0, dcs: 0, hosts: false });
+    }
+    let out = run_script(&app, "cm-splitter.ps1", &["-Action", "status"])?;
+    Ok(parse_cm(&out))
+}
+
+#[tauri::command]
+async fn cm_enable(app: AppHandle) -> Result<String, String> {
+    if !cfg!(windows) {
+        return Err("CM 直连中继目前仅支持 Windows".into());
+    }
+    run_script(&app, "cm-splitter.ps1", &["-Action", "enable"])
+}
+
+#[tauri::command]
+async fn cm_disable(app: AppHandle) -> Result<String, String> {
+    if !cfg!(windows) {
+        return Ok("已跳过（非 Windows）".into());
+    }
+    run_script(&app, "cm-splitter.ps1", &["-Action", "disable"])
+}
+
+#[tauri::command]
+async fn cm_test(app: AppHandle) -> Result<String, String> {
+    if !cfg!(windows) {
+        return Err("CM 直连中继目前仅支持 Windows".into());
+    }
+    run_script(&app, "cm-splitter.ps1", &["-Action", "test"])
+}
+#[tauri::command]
+async fn read_log(app: AppHandle, kind: String, tail: usize) -> Result<String, String> {
     let dir = ensure_scripts(&app)?;
     let name = match kind.as_str() {
         "split" => {
@@ -647,6 +765,7 @@ fn read_log(app: AppHandle, kind: String, tail: usize) -> Result<String, String>
                 String::from("split-proxy.log")
             }
         }
+        "cm" => String::from("cm-splitter.log"),
         _ => String::from("access.log"),
     };
     let p = dir.join(&name);
@@ -660,13 +779,14 @@ fn read_log(app: AppHandle, kind: String, tail: usize) -> Result<String, String>
 }
 
 #[tauri::command]
-fn open_path(app: AppHandle, kind: String) -> Result<(), String> {
+async fn open_path(app: AppHandle, kind: String) -> Result<(), String> {
     let dir = ensure_scripts(&app)?;
     #[cfg(windows)]
     {
         let target = match kind.as_str() {
             "dir" => dir.clone(),
             "split" => dir.join("split-proxy.log"),
+            "cm" => dir.join("cm-splitter.log"),
             _ => dir.join("access.log"),
         };
         let target = if target.exists() {
@@ -695,7 +815,7 @@ fn open_path(app: AppHandle, kind: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn download_test(app: AppHandle, url: String, threads: u32, chunk_mb: u32) -> Result<String, String> {
+async fn download_test(app: AppHandle, url: String, threads: u32, chunk_mb: u32) -> Result<String, String> {
     #[cfg(windows)]
     {
         let t = threads.to_string();
@@ -738,7 +858,11 @@ pub fn run() {
             read_log,
             open_path,
             download_test,
-        ])
+        cm_status,
+        cm_enable,
+        cm_disable,
+        cm_test,
+    ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");
 }

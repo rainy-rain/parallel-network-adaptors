@@ -18,7 +18,7 @@
       </div>
       <div class="top-actions">
         <span class="platform-tag" id="platform-tag">—</span>
-        <button class="btn ghost" id="btn-refresh-all" title="刷新两个工具的状态">刷新状态</button>
+        <button class="btn ghost" id="btn-refresh-all" title="重新读取三项状态。每次都要起 PowerShell，约 1 秒。" title="刷新两个工具的状态">刷新状态</button>
       </div>
     </header>
 
@@ -57,18 +57,18 @@
         </div>
 
         <div class="toolbar">
-          <button class="btn" id="btn-detect">重新检测链路</button>
-          <button class="btn" id="btn-probe">链路自检</button>
-          <button class="btn primary" id="btn-split-start">启动分流</button>
-          <button class="btn" id="btn-split-stop">停止分流</button>
+          <button class="btn" id="btn-detect" title="枚举当前网卡：只保留已启用、有 IPv4、且有默认网关的，并标出物理/虚拟与出口归属。">重新检测链路</button>
+          <button class="btn" id="btn-probe" title="让每条链路各下载 500 KB，验证是否真的能出网并报告速度。">链路自检</button>
+          <button class="btn primary" id="btn-split-start" title="在本机 127.0.0.1:1080 起 SOCKS5，把并发连接按网卡轮询分发。免管理员、不改路由、不装驱动。">启动分流</button>
+          <button class="btn" id="btn-split-stop" title="停掉分流器并释放 1080 端口。">停止分流</button>
           <span class="spacer"></span>
           <label class="inline-field">线程
-            <input type="number" id="threads" value="16" min="1" max="128" />
+            <input type="number" id="threads" title="分片下载的并发线程数。线程越多越容易叠满多条链路，小文件收益有限。" value="16" min="1" max="128" />
           </label>
           <label class="inline-field">分片 MB
-            <input type="number" id="chunk" value="4" min="1" max="64" />
+            <input type="number" id="chunk" title="每个分片多少 MB。文件要切成这么多份才能并行下载。" value="4" min="1" max="64" />
           </label>
-          <button class="btn" id="btn-download">多线程下载测试</button>
+          <button class="btn" id="btn-download" title="按上面的线程数与分片大小跑一次分片下载，验证多链路是否真的叠加。">多线程下载测试</button>
         </div>
 
         <div class="table-wrap">
@@ -95,7 +95,7 @@
             <span>输出</span>
             <div class="log-actions">
               <button class="link-btn" data-open-log="split">打开分流日志</button>
-              <button class="link-btn" id="btn-clear-log">清空</button>
+              <button class="link-btn" id="btn-clear-log" title="清空这一页的日志文字（只清界面，不动文件）。">清空</button>
             </div>
           </div>
           <pre class="log" id="log-adapters"></pre>
@@ -104,6 +104,54 @@
 
       <!-- ============ Steam 社区直连 ============ -->
       <section class="pane" id="pane-steam">
+        <!-- ---------- CM 直连中继 ---------- -->
+        <div class="cards">
+          <div class="card status-card">
+            <div class="card-label">CM 直连（不经过代理）</div>
+            <div class="status-line">
+              <span class="dot" id="cm-dot"></span>
+              <span id="cm-state">未知</span>
+            </div>
+            <div class="status-meta" id="cm-meta">TLS ClientHello 分片，绕过按段匹配的 DPI</div>
+          </div>
+          <div class="card status-card">
+            <div class="card-label">中继</div>
+            <ul class="mini-list">
+              <li><span id="cm-listeners">监听 0</span></li>
+              <li><span id="cm-dcs">DC 0</span></li>
+              <li><span id="cm-hosts">hosts —</span></li>
+              <li><span id="cm-pid">PID —</span></li>
+            </ul>
+          </div>
+          <div class="card status-card hint-card">
+            <div class="card-label">为什么不用代理</div>
+            <p class="hint-text">
+              DPI 只在<b>单个 TCP 段</b>内匹配 ClientHello，不做流重组。把首包切成
+              20 字节的小段发出去即可通过，比走代理快一个数量级。
+            </p>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button class="btn primary" id="btn-cm-enable" title="起 CM 中继（528 个本地监听）并写入 hosts，约 17 秒。完成后要彻底退出 Steam 再启动。">开启 CM 直连</button>
+          <button class="btn" id="btn-cm-disable" title="停掉中继并从 hosts 删掉 CM 段，完全恢复原状。">关闭</button>
+          <button class="btn" id="btn-cm-test" title="对 4 个 DC 各做一次 TLS 握手，验证分片是否真的绕过了按段匹配的 DPI。">测速</button>
+          <button class="btn" id="btn-cm-log" title="打开中继日志文件（记录每次连接与分片情况）。">打开日志</button>
+        </div>
+
+        <div class="log-panel">
+          <div class="log-head">
+            <span>CM 中继输出</span>
+            <div class="log-actions">
+              <button class="link-btn" id="btn-clear-cm-log" title="清空这一页的日志文字。">清空</button>
+            </div>
+          </div>
+          <pre class="log" id="log-cm"></pre>
+        </div>
+
+        <hr class="sep" />
+
+        <!-- ---------- Steam 社区直连 ---------- -->
         <div class="cards">
           <div class="card status-card">
             <div class="card-label">总状态</div>
@@ -132,17 +180,17 @@
         </div>
 
         <div class="toolbar">
-          <button class="btn primary" id="btn-steam-enable">开启</button>
-          <button class="btn" id="btn-steam-disable">关闭</button>
-          <button class="btn" id="btn-steam-test">自检</button>
-          <button class="btn" id="btn-steam-log">打开日志</button>
+          <button class="btn primary" id="btn-steam-enable" title="起 Caddy + 装本地根证书 + 写 hosts，让社区和商店在 SNI 被拦时也能打开。需要管理员。">开启</button>
+          <button class="btn" id="btn-steam-disable" title="停 Caddy + 清 hosts + 删开机自启，保留根证书。">关闭</button>
+          <button class="btn" id="btn-steam-test" title="四项自检（Caddy / hosts / 证书 / 443），再做 SNI 探测、反代连通与一次真实取页。">自检</button>
+          <button class="btn" id="btn-steam-log" title="打开 Caddy 访问日志（JSON，每次请求一行）。">打开日志</button>
         </div>
 
         <div class="log-panel">
           <div class="log-head">
             <span>输出</span>
             <div class="log-actions">
-              <button class="link-btn" id="btn-clear-steam-log">清空</button>
+              <button class="link-btn" id="btn-clear-steam-log" title="清空这一页的日志文字。">清空</button>
             </div>
           </div>
           <pre class="log" id="log-steam"></pre>
